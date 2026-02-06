@@ -5,6 +5,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
 )
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -28,6 +29,7 @@ def generate_launch_description():
 
     # Get package share directories
     fast_lio_package_dir = get_package_share_directory('fast_lio')
+    sc_pgo_package_dir = get_package_share_directory('sc_pgo_ros2')
 
     # Define launch argument values
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -42,6 +44,20 @@ def generate_launch_description():
     fast_lio_config_file = LaunchConfiguration('fast_lio_config_file')
     use_rviz = LaunchConfiguration('use_rviz')
     rviz_config_path = LaunchConfiguration('rviz_config_path')
+
+    # SC-PGO arguments
+    use_sc_pgo = LaunchConfiguration('use_sc_pgo')
+    sc_pgo_rviz = LaunchConfiguration('sc_pgo_rviz')
+    sc_pgo_namespace = LaunchConfiguration('sc_pgo_namespace')
+
+    # Map->Odom TF arguments
+    use_map_odom_tf = LaunchConfiguration('use_map_odom_tf')
+    map_frame_id = LaunchConfiguration('map_frame_id')
+    odom_frame_id = LaunchConfiguration('odom_frame_id')
+
+    # Cloud transform arguments (odom -> map)
+    cloud_in_topic = LaunchConfiguration('cloud_in_topic')
+    cloud_map_topic = LaunchConfiguration('cloud_map_topic')
 
     # OctoMap arguments
     octomap_resolution = LaunchConfiguration('octomap_resolution')
@@ -103,6 +119,57 @@ def generate_launch_description():
         description='Path to RViz configuration file'
     )
 
+    # SC-PGO arguments
+    declare_use_sc_pgo_cmd = DeclareLaunchArgument(
+        'use_sc_pgo',
+        default_value='true',
+        description='Launch SC-PGO (loop closure + pose graph optimization)'
+    )
+
+    declare_sc_pgo_rviz_cmd = DeclareLaunchArgument(
+        'sc_pgo_rviz',
+        default_value='false',
+        description='Launch RViz for SC-PGO'
+    )
+
+    declare_sc_pgo_namespace_cmd = DeclareLaunchArgument(
+        'sc_pgo_namespace',
+        default_value='',
+        description='Namespace for SC-PGO nodes'
+    )
+
+    # Map->Odom TF arguments
+    declare_use_map_odom_tf_cmd = DeclareLaunchArgument(
+        'use_map_odom_tf',
+        default_value='true',
+        description='Launch map->odom TF broadcaster'
+    )
+
+    declare_map_frame_id_cmd = DeclareLaunchArgument(
+        'map_frame_id',
+        default_value='map',
+        description='Map frame for map->odom TF'
+    )
+
+    declare_odom_frame_id_cmd = DeclareLaunchArgument(
+        'odom_frame_id',
+        default_value='odom',
+        description='Odom frame for map->odom TF'
+    )
+
+    # Cloud transform arguments
+    declare_cloud_in_topic_cmd = DeclareLaunchArgument(
+        'cloud_in_topic',
+        default_value='/cloud_registered',
+        description='Input point cloud topic (odom frame)'
+    )
+
+    declare_cloud_map_topic_cmd = DeclareLaunchArgument(
+        'cloud_map_topic',
+        default_value='/cloud_registered_map',
+        description='Output point cloud topic transformed to map frame'
+    )
+
     # OctoMap arguments
     declare_octomap_resolution_cmd = DeclareLaunchArgument(
         'octomap_resolution',
@@ -112,7 +179,7 @@ def generate_launch_description():
 
     declare_octomap_frame_id_cmd = DeclareLaunchArgument(
         'octomap_frame_id',
-        default_value='camera_init',
+        default_value='map',
         description='Fixed map frame for OctoMap'
     )
 
@@ -161,6 +228,58 @@ def generate_launch_description():
         }.items(),
     )
 
+    # Include SC-PGO launch file
+    sc_pgo_launch_description = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                sc_pgo_package_dir, 'launch', 'sc_pgo.launch.py'
+            )
+        ),
+        launch_arguments={
+            'rvizscpgo': sc_pgo_rviz,
+            'namespace': sc_pgo_namespace,
+            'publish_tf': 'false',
+        }.items(),
+        condition=IfCondition(use_sc_pgo),
+    )
+
+    # Map->Odom TF broadcaster node
+    map_odom_tf_node = Node(
+        package='map_odom_broadcaster',
+        executable='map_odom_broadcaster',
+        name='map_odom_broadcaster',
+        output='screen',
+        parameters=[{
+            'pgo_odom_topic': '/aft_pgo_odom',
+            'fastlio_odom_topic': '/Odometry',
+            'map_frame': map_frame_id,
+            'odom_frame': odom_frame_id,
+            'pgo_child_frame': 'aft_pgo',
+            'fastlio_child_frame': 'base_link',
+            'use_pgo_stamp': False,
+            'max_pair_dt_sec': 0.2,
+            'max_age_sec': 1.0,
+            'publish_rate_hz': 20.0,
+        }],
+        condition=IfCondition(use_map_odom_tf),
+    )
+
+    # Transform point cloud from odom -> map for OctoMap input
+    cloud_transform_node = Node(
+        package='map_odom_broadcaster',
+        executable='cloud_frame_transformer',
+        name='cloud_frame_transformer',
+        output='screen',
+        parameters=[{
+            'input_topic': cloud_in_topic,
+            'output_topic': cloud_map_topic,
+            'target_frame': octomap_frame_id,
+            'queue_size': 10,
+            'transform_timeout_sec': 0.1,
+            'use_latest_transform': True,
+        }],
+    )
+
     # Create OctoMap Server node with configurable parameters
     octomap_node = Node(
         package='octomap_server',
@@ -175,7 +294,7 @@ def generate_launch_description():
             'sensor_model.max_range': octomap_max_range,
 
             # Fixed parameters (from original XML launch file)
-            'base_frame_id': 'body',
+            'base_frame_id': 'base_link',
             'incremental_2D_projection': False,
             'occupancy_min_z': 0.1,
             'occupancy_max_z': 1.0,
@@ -187,7 +306,7 @@ def generate_launch_description():
             'pointcloud_max_z': 1.5,
         }],
         remappings=[
-            ('cloud_in', '/cloud_registered'),
+            ('cloud_in', cloud_map_topic),
         ],
     )
 
@@ -203,6 +322,14 @@ def generate_launch_description():
         declare_fast_lio_config_file_cmd,
         declare_use_rviz_cmd,
         declare_rviz_config_path_cmd,
+        declare_use_sc_pgo_cmd,
+        declare_sc_pgo_rviz_cmd,
+        declare_sc_pgo_namespace_cmd,
+        declare_use_map_odom_tf_cmd,
+        declare_map_frame_id_cmd,
+        declare_odom_frame_id_cmd,
+        declare_cloud_in_topic_cmd,
+        declare_cloud_map_topic_cmd,
         declare_octomap_resolution_cmd,
         declare_octomap_frame_id_cmd,
         declare_octomap_max_range_cmd,
@@ -210,6 +337,9 @@ def generate_launch_description():
         # Add all launch descriptions and nodes (start simultaneously)
         livox_driver_node,
         fast_lio_launch_description,
+        sc_pgo_launch_description,
+        map_odom_tf_node,
+        cloud_transform_node,
         octomap_node,
     ])
 
