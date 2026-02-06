@@ -123,7 +123,7 @@ ROS2 automatically manages topic connections, so each node automatically receive
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `octomap_resolution` | `0.05` | Voxel resolution in meters **Configurable** |
-| `octomap_frame_id` | `camera_init` | Fixed map frame for OctoMap **Configurable** |
+| `octomap_frame_id` | `map` | Fixed map frame for OctoMap **Configurable** |
 | `octomap_max_range` | `40.0` | Maximum integration range in meters **Configurable** |
 
 **Note:** OctoMap node is directly instantiated in Python, so all launch arguments take effect immediately and override the defaults.
@@ -212,13 +212,13 @@ All three nodes (Livox, FAST-LIO, OctoMap) respect the `use_sim_time` parameter:
 - Location: `lidar_mapping_bringup/rviz/`
 - Default: `rviz.rviz` (integrated FAST-LIO + OctoMap visualization)
 - **Displays**:
-  - **TF**: Transform frames (camera_init ← body)
+  - **TF**: Transform frames (map → odom → base_link)
   - **Odometry**: FAST-LIO odometry trajectory
   - **Path**: SLAM trajectory history
   - **CloudRegistered**: Registered point cloud from FAST-LIO
   - **CloudMap**: Final SLAM map
   - **Map**: 2D projected occupancy grid from OctoMap (from `/projected_map` topic)
-- **Fixed Frame**: `camera_init`
+- **Fixed Frame**: `map`
 - Launch with `use_rviz:=true` to enable
 
 ## Troubleshooting
