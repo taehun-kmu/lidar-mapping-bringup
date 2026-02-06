@@ -13,6 +13,7 @@
   <exec_depend>livox_ros_driver2</exec_depend>
   <exec_depend>fast_lio</exec_depend>
   <exec_depend>octomap_server</exec_depend>
+  <exec_depend>map_odom_broadcaster</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>launch_xml</exec_depend>
   <exec_depend>rviz2</exec_depend>
